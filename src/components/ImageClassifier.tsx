@@ -1,13 +1,15 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Camera, Upload, X, Loader2 } from "lucide-react";
+import { Camera, Upload, X, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import * as tmImage from "@teachablemachine/image";
+import { supabase } from "@/integrations/supabase/client";
 
-interface ClassificationResult {
-  className: string;
-  probability: number;
+interface AnalysisResult {
+  is_recyclable: boolean;
+  material_type: string;
+  confidence: number;
+  explanation: string;
 }
 
 interface ImageClassifierProps {
@@ -18,15 +20,12 @@ export const ImageClassifier = ({ onBack }: ImageClassifierProps) => {
   const [image, setImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const [results, setResults] = useState<ClassificationResult[]>([]);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
   const [usingCamera, setUsingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
-
-  // Teachable Machine model URL (demo URL - users can replace with their own)
-  const MODEL_URL = "https://teachablemachine.withgoogle.com/models/nY8P7mPe/";
 
   const startCamera = async () => {
     try {
@@ -89,42 +88,35 @@ export const ImageClassifier = ({ onBack }: ImageClassifierProps) => {
     setIsScanning(true);
     
     try {
-      // Load the Teachable Machine model
-      const modelURL = MODEL_URL + "model.json";
-      const metadataURL = MODEL_URL + "metadata.json";
+      console.log('Calling analyze-image function...');
       
-      const model = await tmImage.load(modelURL, metadataURL);
-      
-      // Create an image element to pass to the model
-      const img = new Image();
-      img.src = imageData;
-      
-      await new Promise((resolve) => {
-        img.onload = resolve;
+      const { data, error } = await supabase.functions.invoke('analyze-image', {
+        body: { imageData }
       });
 
-      // Run the prediction
-      const predictions = await model.predict(img);
-      
-      // Sort by probability and format results
-      const sortedResults = predictions
-        .sort((a, b) => b.probability - a.probability)
-        .map(pred => ({
-          className: pred.className,
-          probability: pred.probability,
-        }));
+      if (error) {
+        console.error('Function error:', error);
+        throw error;
+      }
 
-      setResults(sortedResults);
+      if (!data || !data.analysis) {
+        throw new Error('No analysis result received');
+      }
+
+      console.log('Analysis result:', data.analysis);
+      setResult(data.analysis);
       
       toast({
         title: "Analysis Complete",
-        description: "Material identified successfully!",
+        description: data.analysis.is_recyclable 
+          ? "This item is recyclable! ♻️" 
+          : "This item is not recyclable.",
       });
     } catch (error) {
-      console.error("Classification error:", error);
+      console.error("Analysis error:", error);
       toast({
-        title: "Classification Error",
-        description: "Unable to classify the image. Please try again with a different image.",
+        title: "Analysis Error",
+        description: error instanceof Error ? error.message : "Unable to analyze the image. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -135,7 +127,7 @@ export const ImageClassifier = ({ onBack }: ImageClassifierProps) => {
 
   const resetClassifier = () => {
     setImage(null);
-    setResults([]);
+    setResult(null);
     setIsScanning(false);
     stopCamera();
   };
@@ -261,44 +253,60 @@ export const ImageClassifier = ({ onBack }: ImageClassifierProps) => {
                 </div>
               )}
 
-              {!isLoading && results.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-xl font-semibold">Classification Results</h3>
-                  
-                  {results.map((result, index) => (
-                    <div 
-                      key={index}
-                      className={`p-4 rounded-lg border ${
-                        index === 0 
-                          ? 'bg-primary/5 border-primary' 
-                          : 'bg-card border-border'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-semibold text-lg">{result.className}</span>
-                        <span className={`text-sm font-medium ${
-                          index === 0 ? 'text-primary' : 'text-muted-foreground'
-                        }`}>
-                          {(result.probability * 100).toFixed(1)}%
-                        </span>
+              {!isLoading && result && (
+                <div className="space-y-4 animate-fade-in">
+                  <div className={`p-6 rounded-lg border-2 ${
+                    result.is_recyclable 
+                      ? 'bg-green-50 dark:bg-green-950/20 border-green-500' 
+                      : 'bg-red-50 dark:bg-red-950/20 border-red-500'
+                  }`}>
+                    <div className="flex items-center gap-3 mb-4">
+                      {result.is_recyclable ? (
+                        <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <XCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
+                      )}
+                      <h3 className="text-2xl font-bold">
+                        {result.is_recyclable ? 'Recyclable ♻️' : 'Not Recyclable'}
+                      </h3>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <span className="font-semibold text-sm text-muted-foreground">Material Type:</span>
+                        <p className="text-lg font-medium">{result.material_type}</p>
                       </div>
-                      <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full ${
-                            index === 0 ? 'bg-primary' : 'bg-muted-foreground'
-                          }`}
-                          style={{ width: `${result.probability * 100}%` }}
-                        />
+                      
+                      <div>
+                        <span className="font-semibold text-sm text-muted-foreground">Confidence:</span>
+                        <div className="flex items-center gap-3 mt-1">
+                          <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full ${
+                                result.is_recyclable ? 'bg-green-600' : 'bg-red-600'
+                              }`}
+                              style={{ width: `${result.confidence * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-medium min-w-[3rem]">
+                            {(result.confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <span className="font-semibold text-sm text-muted-foreground">Explanation:</span>
+                        <p className="mt-1 text-sm leading-relaxed">{result.explanation}</p>
                       </div>
                     </div>
-                  ))}
+                  </div>
 
                   <Button
                     variant="outline"
                     onClick={resetClassifier}
-                    className="w-full mt-6"
+                    className="w-full"
                   >
-                    Classify Another Item
+                    Scan Another Item
                   </Button>
                 </div>
               )}
@@ -307,11 +315,10 @@ export const ImageClassifier = ({ onBack }: ImageClassifierProps) => {
         </Card>
 
         <div className="mt-8 p-6 rounded-lg bg-muted/50 border border-border">
-          <h3 className="font-semibold mb-2 text-primary">💡 Using Your Own Model</h3>
+          <h3 className="font-semibold mb-2 text-primary">🤖 Powered by AI</h3>
           <p className="text-sm text-muted-foreground">
-            This demo uses a sample Teachable Machine model. To use your own custom model, 
-            train it at <a href="https://teachablemachine.withgoogle.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">teachablemachine.withgoogle.com</a>, 
-            then update the MODEL_URL in the code with your model's URL.
+            This tool uses Google Gemini AI to analyze images and identify recyclable materials. 
+            All images are securely stored and analyzed to help you make better recycling decisions.
           </p>
         </div>
       </div>

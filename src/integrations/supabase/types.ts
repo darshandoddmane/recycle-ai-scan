@@ -14,7 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      image_scans: {
+        Row: {
+          analysis_result: Json | null
+          confidence: number | null
+          created_at: string
+          id: string
+          image_path: string
+          image_url: string
+          is_recyclable: boolean | null
+          material_type: string | null
+        }
+        Insert: {
+          analysis_result?: Json | null
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          image_path: string
+          image_url: string
+          is_recyclable?: boolean | null
+          material_type?: string | null
+        }
+        Update: {
+          analysis_result?: Json | null
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          image_path?: string
+          image_url?: string
+          is_recyclable?: boolean | null
+          material_type?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
